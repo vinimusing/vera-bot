@@ -2,10 +2,10 @@
 """
 magicpin AI Challenge — Vera Bot
 =================================
-Google Gemini 2.0 Flash powered merchant engagement bot.
+Claude Sonnet 4 powered merchant engagement bot.
 
-Free API key from: https://aistudio.google.com/apikey
-Set as environment variable: GEMINI_API_KEY
+API key from: https://console.anthropic.com
+Set as environment variable: ANTHROPIC_API_KEY
 
 Endpoints:
   GET  /v1/healthz
@@ -31,17 +31,14 @@ import httpx
 # ═══════════════════════════════════════════════
 # CONFIG
 # ═══════════════════════════════════════════════
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("vera")
 
 app = FastAPI(title="Vera Bot — magicpin AI Challenge")
-@app.get("/")
-async def root():
-    return {"service": "vera-bot", "status": "running", "endpoints": ["/v1/healthz", "/v1/metadata", "/v1/context", "/v1/tick", "/v1/reply"]}
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 START = time.time()
 
@@ -91,30 +88,33 @@ def find_digest_item(category: dict, item_id: str) -> Optional[dict]:
     return None
 
 # ═══════════════════════════════════════════════
-# GEMINI API
+# CLAUDE API
 # ═══════════════════════════════════════════════
-async def ask_gemini(system: str, user: str, max_tok: int = 1200) -> str:
-    if not GEMINI_API_KEY:
-        log.warning("No GEMINI_API_KEY — fallback mode")
+async def ask_llm(system: str, user: str, max_tok: int = 1200) -> str:
+    if not ANTHROPIC_API_KEY:
+        log.warning("No ANTHROPIC_API_KEY — fallback mode")
         return ""
     try:
         async with httpx.AsyncClient(timeout=25.0) as c:
             r = await c.post(
-                f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-                headers={"Content-Type": "application/json"},
+                ANTHROPIC_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                },
                 json={
-                    "contents": [{"role": "user", "parts": [{"text": f"{system}\n\n---\n\n{user}"}]}],
-                    "generationConfig": {
-                        "temperature": 0,
-                        "maxOutputTokens": max_tok,
-                        "responseMimeType": "application/json",
-                    },
+                    "model": ANTHROPIC_MODEL,
+                    "max_tokens": max_tok,
+                    "temperature": 0,
+                    "system": system,
+                    "messages": [{"role": "user", "content": user}],
                 },
             )
             r.raise_for_status()
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return r.json()["content"][0]["text"]
     except Exception as e:
-        log.error(f"Gemini error: {e}")
+        log.error(f"Claude error: {e}")
         return ""
 
 def parse_json(raw: str) -> dict:
@@ -580,8 +580,8 @@ async def metadata():
     return {
         "team_name": "Vera Builder",
         "team_members": ["Builder"],
-        "model": f"google/{GEMINI_MODEL}",
-        "approach": "4-context composer with trigger-kind-aware prompt routing covering 26 trigger types across 5 verticals. Optimized for 5-dimension scoring. Gemini 2.0 Flash for composition. Auto-reply detection (3-strike escalation), intent-transition handling, Hindi-English code-mix. Full context grounding with zero hallucination. Data-driven fallbacks.",
+        "model": ANTHROPIC_MODEL,
+        "approach": "4-context composer with trigger-kind-aware prompt routing covering 26 trigger types across 5 verticals. Optimized for 5-dimension scoring. Claude Sonnet 4 for composition. Auto-reply detection (3-strike escalation), intent-transition handling, Hindi-English code-mix. Full context grounding with zero hallucination. Data-driven fallbacks.",
         "contact_email": "builder@example.com",
         "version": "2.1.0",
         "submitted_at": datetime.utcnow().isoformat() + "Z",
@@ -635,7 +635,7 @@ async def tick(body: TickBody):
 
         # Compose
         prompt = build_compose_prompt(cat, merch, trig, cust)
-        raw = await ask_gemini(SYSTEM, prompt)
+        raw = await ask_llm(SYSTEM, prompt)
 
         body_text = cta = rationale = None
         if raw:
@@ -695,7 +695,7 @@ async def reply(body: ReplyBody):
         cat = get_ctx("category", merch.get("category_slug", "")) or {}
         cust = get_ctx("customer", body.customer_id) if body.customer_id else None
         prompt = build_reply_prompt(cat, merch, turns, body.message, cust)
-        raw = await ask_gemini(SYSTEM, prompt, max_tok=800)
+        raw = await ask_llm(SYSTEM, prompt, max_tok=800)
         if raw:
             try:
                 result = parse_json(raw)
