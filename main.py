@@ -40,6 +40,9 @@ log = logging.getLogger("vera")
 
 app = FastAPI(title="Vera Bot — magicpin AI Challenge")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+@app.get("/")
+async def root():
+    return {"service": "vera-bot", "status": "running"}
 START = time.time()
 
 # ═══════════════════════════════════════════════
