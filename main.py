@@ -567,8 +567,14 @@ def fallback_compose(cat, merch, trig, cust):
     return (body, "binary_yes_no", f"Data-grounded fallback for trigger {kind}")
 
 
-def fallback_reply(msg, turns):
+def fallback_reply(msg, turns, merch=None, cust=None):
     ml = msg.lower().strip()
+
+    # Get names for personalization
+    cust_name = cust.get("identity", {}).get("name", "") if cust else ""
+    merch_name = merch.get("identity", {}).get("owner_first_name", "") if merch else ""
+    biz_name = merch.get("identity", {}).get("name", "") if merch else ""
+    address_name = cust_name if cust else merch_name
 
     auto_signals = ["thank you for contacting", "our team will respond", "automated assistant",
                     "we will get back", "please wait", "your message is important",
@@ -587,16 +593,6 @@ def fallback_reply(msg, turns):
                 "cta": "binary_yes_no",
                 "rationale": "Auto-reply #1. Nudging for real owner."}
 
-    intent_signals = ["yes", "haan", "ok", "sure", "go ahead", "proceed", "let's do it",
-                      "kar do", "bhej do", "chalega", "send it", "book it", "confirm",
-                      "done", "fine", "theek hai", "chalo", "let's go", "do it",
-                      "please book", "set it up", "i'm in", "count me in"]
-    if any(s in ml for s in intent_signals):
-        return {"action": "send",
-                "body": "Done — abhi set up kar rahi hoon. Confirmation 2 minute mein bhejti hoon. 👍",
-                "cta": "none",
-                "rationale": "Intent detected. Switching to action mode immediately."}
-
     # Hostile detection (check BEFORE stop — hostile messages often contain "stop")
     hostile_signals = ["bakwas", "spam", "fraud", "scam", "waste", "useless", "stupid",
                        "shut up", "get lost", "pagal", "bewakoof", "chup", "rubbish",
@@ -612,6 +608,22 @@ def fallback_reply(msg, turns):
     if any(s in ml for s in stop_signals):
         return {"action": "end", "rationale": "Merchant opted out. Respecting preference."}
 
+    intent_signals = ["yes", "haan", "ok", "sure", "go ahead", "proceed", "let's do it",
+                      "kar do", "bhej do", "chalega", "send it", "book it", "confirm",
+                      "done", "fine", "theek hai", "chalo", "let's go", "do it",
+                      "please book", "set it up", "i'm in", "count me in"]
+    if any(s in ml for s in intent_signals):
+        if cust and merch:
+            offers = [o for o in merch.get("offers", []) if o.get("status") == "active"]
+            offer_str = f" {offers[0]['title']}" if offers else ""
+            body = f"{cust_name}, done! Aapka appointment set up kar rahi hoon —{offer_str}. Confirmation bhejti hoon shortly. 👍"
+        elif merch:
+            body = f"{merch_name}, done! Abhi set up kar rahi hoon. Confirmation 2 minute mein bhejti hoon. 👍"
+        else:
+            body = "Done — abhi set up kar rahi hoon. Confirmation 2 minute mein bhejti hoon. 👍"
+        return {"action": "send", "body": body, "cta": "none",
+                "rationale": "Intent detected. Switching to action mode immediately."}
+
     # Off-topic detection
     offtopic_signals = ["gst", "tax", "legal", "lawyer", "court", "accounting", "ca ",
                         "chartered accountant", "income tax", "tds", "compliance filing",
@@ -622,10 +634,16 @@ def fallback_reply(msg, turns):
                 "cta": "binary_yes_no",
                 "rationale": "Off-topic deflected. Redirected to Vera's core value."}
 
+    if address_name:
+        return {"action": "send",
+                "body": f"Noted {address_name}! Aur kuch help chahiye toh bata dena.",
+                "cta": "open_ended",
+                "rationale": "Engaged response with personalization."}
+
     return {"action": "send",
             "body": "Noted! Aur kuch help chahiye toh bata dena.",
             "cta": "open_ended",
-            "rationale": "Engaged merchant, offering continued help."}
+            "rationale": "Engaged response."}
 
 # ═══════════════════════════════════════════════
 # ENDPOINTS
@@ -775,8 +793,9 @@ async def reply(body: ReplyBody):
     turns = conversations[cid]
 
     merch = get_ctx("merchant", body.merchant_id) if body.merchant_id else None
+    cust = None
     if not merch:
-        result = fallback_reply(body.message, turns)
+        result = fallback_reply(body.message, turns, None, None)
     else:
         cat = get_ctx("category", merch.get("category_slug", "")) or {}
         cust = get_ctx("customer", body.customer_id) if body.customer_id else None
@@ -786,11 +805,11 @@ async def reply(body: ReplyBody):
             try:
                 result = parse_json(raw)
                 if result.get("action") == "send" and not result.get("body"):
-                    result = fallback_reply(body.message, turns)
+                    result = fallback_reply(body.message, turns, merch, cust)
             except Exception:
-                result = fallback_reply(body.message, turns)
+                result = fallback_reply(body.message, turns, merch, cust)
         else:
-            result = fallback_reply(body.message, turns)
+            result = fallback_reply(body.message, turns, merch, cust)
 
     if result.get("action") == "end":
         ended_convos.add(cid)
