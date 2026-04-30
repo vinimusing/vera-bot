@@ -32,7 +32,7 @@ import httpx
 # CONFIG
 # ═══════════════════════════════════════════════
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
+ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -40,10 +40,11 @@ log = logging.getLogger("vera")
 
 app = FastAPI(title="Vera Bot — magicpin AI Challenge")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+START = time.time()
+
 @app.get("/")
 async def root():
-    return {"service": "vera-bot", "status": "running"}
-START = time.time()
+    return {"service": "vera-bot", "status": "running", "endpoints": ["/v1/healthz", "/v1/metadata", "/v1/context", "/v1/tick", "/v1/reply"]}
 
 # ═══════════════════════════════════════════════
 # IN-MEMORY STATE
@@ -325,7 +326,11 @@ def build_compose_prompt(cat: dict, merch: dict, trig: dict, cust: Optional[dict
         p.append(f"Services received: {cr.get('services_received', [])}")
         p.append(f"Preferred slots: {cp.get('preferred_slots','?')}, Channel: {cp.get('channel','?')}")
         p.append(f"Consent scope: {cc.get('scope', [])}")
-        p.append(f"\n⚠️ CUSTOMER-FACING: Speak as '{identity.get('name', 'the business')}'. Do NOT mention Vera. Honor language_pref and preferred_slots.")
+        p.append(f"\n⚠️⚠️⚠️ CRITICAL — CUSTOMER-FACING MESSAGE ⚠️⚠️⚠️")
+        p.append(f"Speak AS '{identity.get('name', 'the business')}' TO the customer '{ci.get('name','')}'.")
+        p.append(f"Address the customer as '{ci.get('name','')}' in the salutation — NOT the merchant owner '{identity.get('owner_first_name','')}'.")
+        p.append(f"Example: 'Hi {ci.get('name','')}, ...' NOT 'Hi {identity.get('owner_first_name','')}, ...'")
+        p.append(f"NEVER mention Vera. Honor language_pref ({ci.get('language_pref','en')}) and preferred_slots ({cp.get('preferred_slots','?')}).")
     else:
         p.append(f"\nThis is MERCHANT-FACING. Speak as Vera to the merchant owner.")
 
@@ -390,9 +395,14 @@ def build_reply_prompt(cat: dict, merch: dict, turns: list, msg: str, cust: Opti
     p.append(f"Signals: {merch.get('signals', [])}")
 
     if cust:
+        ci = cust.get("identity", {})
         p.append(f"\n=== CUSTOMER ===")
         p.append(json.dumps(cust))
-        p.append(f"⚠️ Speak as '{identity.get('name','the business')}', NOT as Vera.")
+        p.append(f"\n⚠️⚠️⚠️ CRITICAL — CUSTOMER-FACING CONVERSATION ⚠️⚠️⚠️")
+        p.append(f"You are speaking AS '{identity.get('name','the business')}' TO the customer '{ci.get('name','the customer')}'.")
+        p.append(f"Address the CUSTOMER by their name '{ci.get('name','')}', NOT the merchant owner.")
+        p.append(f"Example: 'Hi {ci.get('name','')}, aapka appointment confirmed...' NOT 'Hi {identity.get('owner_first_name','')}, ...'")
+        p.append(f"NEVER mention Vera. NEVER address the merchant owner in this reply.")
 
     p.append(f"\n=== FULL CONVERSATION ===")
     for t in turns:
@@ -610,6 +620,7 @@ async def tick(body: TickBody):
     for trg_id in body.available_triggers:
         trig = get_ctx("trigger", trg_id)
         if not trig:
+            log.warning(f"Trigger {trg_id} not found in context store — skipping")
             continue
         mid = trig.get("merchant_id")
         if not mid or mid in suppressed_merchants:
@@ -619,10 +630,28 @@ async def tick(body: TickBody):
             continue
         merch = get_ctx("merchant", mid)
         if not merch:
+            log.warning(f"Merchant {mid} not found for trigger {trg_id} — skipping")
             continue
-        cat = get_ctx("category", merch.get("category_slug", ""))
+
+        # Try multiple ways to find category
+        cat_slug = merch.get("category_slug", "")
+        cat = get_ctx("category", cat_slug)
         if not cat:
-            continue
+            # Try without trailing 's' or with trailing 's'
+            cat = get_ctx("category", cat_slug.rstrip("s"))
+            if not cat:
+                cat = get_ctx("category", cat_slug + "s")
+            if not cat:
+                # Search all loaded categories for a partial match
+                for (scope, cid), entry in contexts.items():
+                    if scope == "category":
+                        if cat_slug in cid or cid in cat_slug:
+                            cat = entry["payload"]
+                            break
+            if not cat:
+                # Use empty category rather than skipping entirely
+                log.warning(f"Category '{cat_slug}' not found for merchant {mid} — using minimal category")
+                cat = {"slug": cat_slug, "voice": {}, "offer_catalog": [], "peer_stats": {}, "digest": []}
 
         cust = None
         cid = trig.get("customer_id")
@@ -648,12 +677,13 @@ async def tick(body: TickBody):
                 cta = data.get("cta", "open_ended")
                 rationale = data.get("rationale", "Composed from 4-context framework")
             except Exception as e:
-                log.warning(f"Parse error: {e}")
+                log.warning(f"Parse error for trigger {trg_id}: {e}")
 
         if not body_text:
             body_text, cta, rationale = fallback_compose(cat, merch, trig, cust)
 
         if not body_text:
+            log.warning(f"No body generated for trigger {trg_id} — skipping")
             continue
 
         if sup_key:
@@ -677,6 +707,8 @@ async def tick(body: TickBody):
             "suppression_key": sup_key,
             "rationale": rationale,
         })
+
+    log.info(f"Tick processed {len(body.available_triggers)} triggers → {len(actions)} actions")
     return {"actions": actions}
 
 
