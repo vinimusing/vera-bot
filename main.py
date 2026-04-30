@@ -179,6 +179,12 @@ You are scored on 5 dimensions (0-10 each). Optimize ALL:
   * RECIPROCITY: "Aapke account mein yeh dikha, socha bata doon"
 - End with the CTA, not a trailing thought
 
+## 6. JUDGMENT — add your own thinking, don't just template
+- If the data suggests NOT doing something, say so. Example: IPL match on Saturday (peak day anyway) → "Saturday already peak hota hai, ad spend save karein aur weekday ke liye rakhein"
+- If a metric looks suspicious, flag it: "CTR up but calls down — could be bot traffic"
+- If timing is wrong, wait: return action=wait instead of forcing a bad message
+- This contrarian, data-informed judgment is the HIGHEST signal of quality
+
 ## HARD RULES
 1. NEVER fabricate data not in the provided context
 2. NEVER use words from voice.vocab_taboo
@@ -417,26 +423,46 @@ ANALYZE and respond with ONLY valid JSON.
 
 CHECK IN THIS ORDER:
 
-1. AUTO-REPLY? Look for: "Thank you for contacting", "Our team will respond shortly", "automated assistant", "we will get back", "your message is important", or IDENTICAL text to a previous message.
-   Count auto-replies in conversation:
-   → 1st: {"action":"send","body":"Lagta hai auto-reply hai — jab owner dekhe, sirf 'Yes' reply kar dena. 😊","cta":"binary_yes_no","rationale":"Auto-reply #1, one nudge to owner"}
-   → 2nd: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #2. Waiting 24h."}
-   → 3rd+: {"action":"end","rationale":"Auto-reply 3+ times. Closing."}
+1. AUTO-REPLY? Look for: "Thank you for contacting", "Our team will respond shortly", "automated assistant", "we will get back", "your message is important", "Welcome to", "We received your message", or IDENTICAL/near-identical text to a previous message in the conversation, or any generic canned response that doesn't reference the conversation topic.
+   Count auto-replies in the FULL conversation history above:
+   → 1st auto-reply: {"action":"send","body":"Lagta hai auto-reply hai — jab owner dekhe, sirf 'Yes' reply kar dena. 😊","cta":"binary_yes_no","rationale":"Auto-reply #1, one nudge to owner"}
+   → 2nd auto-reply: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #2. Waiting 24h for real owner."}
+   → 3rd auto-reply: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #3. Still waiting."}
+   → 4th+ auto-reply: {"action":"end","rationale":"Auto-reply 4+ times. No real engagement. Closing gracefully."}
 
-2. INTENT? Words like: "yes", "haan", "ok", "go ahead", "proceed", "let's do it", "kar do", "bhej do", "chalega", "send it", "book it", "confirm"
-   → IMMEDIATELY switch to ACTION. Do NOT ask another question. Tell them what you're doing NOW. Be specific about the action.
+2. INTENT TRANSITION? If the merchant/customer says ANYTHING that signals agreement or readiness:
+   Words: "yes", "haan", "ok", "sure", "go ahead", "proceed", "let's do it", "kar do", "bhej do", "chalega", "send it", "book it", "confirm", "done", "fine", "theek hai", "chalo", "let's go", "do it", "please book", "set it up", "I'm in", "count me in"
+   → CRITICAL: IMMEDIATELY switch to ACTION mode. Do NOT ask another qualifying question. Do NOT ask "which date?" or "what time?" if they already specified it. Tell them EXACTLY what you are doing NOW. Be specific:
+     - If they said "book Wed 5 Nov 6pm" → confirm that exact slot
+     - If they said "yes send it" → tell them you're sending it now
+     - If they just said "yes" → execute whatever you proposed in your last message
+   → Use their name (customer name for customer-facing, owner name for merchant-facing)
+   → Include specific details from context (offer price, service name, time)
 
-3. STOP? Words like: "stop", "not interested", "band karo", "don't message", "unsubscribe", "leave me alone", "mat bhejo"
-   → {"action":"end","rationale":"Merchant opted out."}
+3. STOP/UNSUBSCRIBE? Words: "stop", "not interested", "band karo", "don't message", "unsubscribe", "leave me alone", "mat bhejo", "no thanks", "not now"
+   → {"action":"end","rationale":"Merchant/customer opted out. Respecting preference."}
 
-4. HOSTILE? Anger, abuse, frustration
-   → {"action":"send","body":"Sorry for the trouble. Aage se nahi bhejungi. Kuch chahiye ho toh 'Hi Vera' bol dena. 🙏","cta":"none","rationale":"Hostile, graceful exit"}
+4. HOSTILE/ABUSIVE? Anger, frustration, rude language, cursing
+   → One empathetic line + graceful exit. Do NOT argue or get defensive.
+   → {"action":"send","body":"Sorry for the inconvenience. Aage se nahi bhejungi. Kuch chahiye ho toh kabhi bhi 'Hi Vera' bol dena. 🙏","cta":"none","rationale":"Hostile response detected. One empathetic exit."}
 
-5. OFF-TOPIC? GST, legal, accounting, personal
-   → Politely decline in 1 sentence, redirect to original topic
+5. OFF-TOPIC? Questions about GST, legal matters, accounting, personal questions, tech support, anything outside Vera's merchant growth scope
+   → Politely decline in 1 sentence. Do NOT try to help with the off-topic request. Redirect to the original topic with a specific offer.
+   → Example: {"action":"send","body":"GST filing mein main help nahi kar paungi — uske liye CA se baat karein. Btw, aapke Dental Cleaning @ ₹299 offer pe 2,410 searches aa rahe hain — usko push karein?","cta":"binary_yes_no","rationale":"Off-topic deflected, redirected to original value prop with specific data"}
 
-6. ENGAGED? Question or interest
-   → Answer with specifics from context. SHORT. ONE CTA at end.
+6. QUESTION? Merchant/customer asks a specific question about their data, offers, or Vera's capabilities
+   → Answer with SPECIFIC facts from the context provided. Use exact numbers. Keep it SHORT (2-3 sentences). End with ONE CTA.
+
+7. ENGAGED REPLY? Any other engaged response showing interest
+   → Continue the conversation naturally. Use context data. ONE CTA at end. Keep short.
+
+CRITICAL RULES FOR ALL REPLIES:
+- If customer context exists → address the CUSTOMER by name, speak as the merchant's business
+- If no customer context → address the MERCHANT OWNER by name, speak as Vera
+- NEVER fabricate data not in the context
+- NEVER use vocab_taboo words
+- Keep replies SHORT (2-4 sentences for WhatsApp)
+- ONE CTA at end, never in the middle
 
 Return ONE of:
 {"action":"send","body":"text","cta":"open_ended|binary_yes_no|none","rationale":"why"}
@@ -545,12 +571,15 @@ def fallback_reply(msg, turns):
     ml = msg.lower().strip()
 
     auto_signals = ["thank you for contacting", "our team will respond", "automated assistant",
-                    "we will get back", "please wait", "your message is important"]
+                    "we will get back", "please wait", "your message is important",
+                    "welcome to", "we received your message"]
     if any(s in ml for s in auto_signals):
         auto_count = sum(1 for t in turns if t["from"] != "vera" and
                         any(s in t["body"].lower() for s in auto_signals))
-        if auto_count >= 3:
-            return {"action": "end", "rationale": "Auto-reply 3+ times. Closing conversation."}
+        if auto_count >= 4:
+            return {"action": "end", "rationale": "Auto-reply 4+ times. Closing conversation."}
+        elif auto_count >= 3:
+            return {"action": "wait", "wait_seconds": 86400, "rationale": "Auto-reply #3. Still waiting for real owner."}
         elif auto_count >= 2:
             return {"action": "wait", "wait_seconds": 86400, "rationale": "Auto-reply #2. Waiting 24h for owner."}
         return {"action": "send",
@@ -558,18 +587,40 @@ def fallback_reply(msg, turns):
                 "cta": "binary_yes_no",
                 "rationale": "Auto-reply #1. Nudging for real owner."}
 
-    intent_signals = ["yes", "haan", "ok", "go ahead", "proceed", "let's do it",
-                      "kar do", "bhej do", "chalega", "send it", "book it", "confirm"]
+    intent_signals = ["yes", "haan", "ok", "sure", "go ahead", "proceed", "let's do it",
+                      "kar do", "bhej do", "chalega", "send it", "book it", "confirm",
+                      "done", "fine", "theek hai", "chalo", "let's go", "do it",
+                      "please book", "set it up", "i'm in", "count me in"]
     if any(s in ml for s in intent_signals):
         return {"action": "send",
-                "body": "Done — abhi set up kar rahi hoon. 2 minute mein update deti hoon.",
+                "body": "Done — abhi set up kar rahi hoon. Confirmation 2 minute mein bhejti hoon. 👍",
                 "cta": "none",
-                "rationale": "Intent detected. Switching to action mode."}
+                "rationale": "Intent detected. Switching to action mode immediately."}
+
+    # Hostile detection (check BEFORE stop — hostile messages often contain "stop")
+    hostile_signals = ["bakwas", "spam", "fraud", "scam", "waste", "useless", "stupid",
+                       "shut up", "get lost", "pagal", "bewakoof", "chup", "rubbish",
+                       "nonsense", "faltu", "bekaar"]
+    if any(s in ml for s in hostile_signals):
+        return {"action": "send",
+                "body": "Sorry for the inconvenience. Aage se nahi bhejungi. Kuch chahiye ho toh kabhi bhi 'Hi Vera' bol dena. 🙏",
+                "cta": "none",
+                "rationale": "Hostile response detected. Graceful exit with open door."}
 
     stop_signals = ["stop", "not interested", "band karo", "don't message",
-                    "unsubscribe", "leave me alone", "mat bhejo"]
+                    "unsubscribe", "leave me alone", "mat bhejo", "no thanks", "not now"]
     if any(s in ml for s in stop_signals):
         return {"action": "end", "rationale": "Merchant opted out. Respecting preference."}
+
+    # Off-topic detection
+    offtopic_signals = ["gst", "tax", "legal", "lawyer", "court", "accounting", "ca ",
+                        "chartered accountant", "income tax", "tds", "compliance filing",
+                        "bank loan", "emi", "insurance"]
+    if any(s in ml for s in offtopic_signals):
+        return {"action": "send",
+                "body": "Iss topic mein main help nahi kar paungi — uske liye apne CA ya advisor se baat karein. Btw, aapke profile pe kuch interesting data dikha — share karoon?",
+                "cta": "binary_yes_no",
+                "rationale": "Off-topic deflected. Redirected to Vera's core value."}
 
     return {"action": "send",
             "body": "Noted! Aur kuch help chahiye toh bata dena.",
