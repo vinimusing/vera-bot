@@ -188,12 +188,14 @@ You are scored on 5 dimensions (0-10 each). Optimize ALL:
 ## HARD RULES
 1. NEVER fabricate data not in the provided context
 2. NEVER use words from voice.vocab_taboo
-3. ONE CTA per message, at the end
-4. customer-facing (send_as=merchant_on_behalf): speak AS the merchant's clinic/shop, NEVER mention Vera
+3. ONE CTA per message, at the end — make it binary (YES/NO) when possible, it scores highest
+4. customer-facing (send_as=merchant_on_behalf): speak AS the merchant's clinic/shop, NEVER mention Vera. Address the CUSTOMER by name.
 5. No preambles — no "I hope you're doing well", no "I wanted to reach out"
 6. service+price ("Dental Cleaning @ ₹299") ALWAYS beats discount format ("20% off")
-7. Keep messages 3-5 sentences for WhatsApp. Not an email.
+7. Keep messages 3-5 sentences for WhatsApp. Not an email. SHORT replies score better.
 8. The rationale field must match what you actually wrote — judge cross-checks this
+9. For REPLIES: keep responses under 4 sentences. Be concise. Answer then CTA. Do not write paragraphs.
+10. Every CTA must remove a barrier: "no commitment", "2 min ka kaam", "just say GO", "no auto-charge"
 
 OUTPUT — return ONLY valid JSON, nothing else:
 {"body": "the WhatsApp message text", "cta": "binary_yes_no|open_ended|binary_confirm_cancel|multi_choice_slot|none", "rationale": "1-2 sentences: why now + which scoring dimensions this targets"}"""
@@ -646,6 +648,35 @@ def fallback_reply(msg, turns, merch=None, cust=None):
             "rationale": "Engaged response."}
 
 # ═══════════════════════════════════════════════
+# TRUNCATED JSON RECOVERY
+# ═══════════════════════════════════════════════
+def recover_truncated_reply(raw: str, msg: str, turns: list, merch=None, cust=None) -> dict:
+    """Try to extract a usable reply from truncated Claude JSON output."""
+    try:
+        # Try to find the body field even in broken JSON
+        import re
+        body_match = re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+        if body_match:
+            body_text = body_match.group(1)
+            # Clean up: if body got cut off mid-sentence, add ellipsis and CTA
+            if not body_text.endswith(('.', '?', '!')):
+                body_text = body_text.rstrip() + "... Reply YES to continue."
+            
+            cta_match = re.search(r'"cta"\s*:\s*"([^"]*)"', raw)
+            cta = cta_match.group(1) if cta_match else "binary_yes_no"
+            
+            return {
+                "action": "send",
+                "body": body_text,
+                "cta": cta,
+                "rationale": "Recovered from truncated response."
+            }
+    except Exception:
+        pass
+    
+    return fallback_reply(msg, turns, merch, cust)
+
+# ═══════════════════════════════════════════════
 # ENDPOINTS
 # ═══════════════════════════════════════════════
 
@@ -800,14 +831,15 @@ async def reply(body: ReplyBody):
         cat = get_ctx("category", merch.get("category_slug", "")) or {}
         cust = get_ctx("customer", body.customer_id) if body.customer_id else None
         prompt = build_reply_prompt(cat, merch, turns, body.message, cust)
-        raw = await ask_llm(SYSTEM, prompt, max_tok=800)
+        raw = await ask_llm(SYSTEM, prompt, max_tok=1200)
         if raw:
             try:
                 result = parse_json(raw)
                 if result.get("action") == "send" and not result.get("body"):
                     result = fallback_reply(body.message, turns, merch, cust)
             except Exception:
-                result = fallback_reply(body.message, turns, merch, cust)
+                # Try to recover truncated JSON — extract body if possible
+                result = recover_truncated_reply(raw, body.message, turns, merch, cust)
         else:
             result = fallback_reply(body.message, turns, merch, cust)
 
