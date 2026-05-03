@@ -706,7 +706,7 @@ async def metadata():
         "model": ANTHROPIC_MODEL,
         "approach": "4-context composer with trigger-kind-aware prompt routing covering 26 trigger types across 5 verticals. Optimized for 5-dimension scoring. Claude Sonnet 4 for composition. Auto-reply detection (3-strike escalation), intent-transition handling, Hindi-English code-mix. Full context grounding with zero hallucination. Data-driven fallbacks.",
         "contact_email": "builder@example.com",
-        "version": "2.1.0",
+        "version": "3.0.0",
         "submitted_at": datetime.utcnow().isoformat() + "Z",
     }
 
