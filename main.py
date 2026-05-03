@@ -186,15 +186,15 @@ You are scored on 5 dimensions (0-10 each). Optimize ALL:
 - This contrarian, data-informed judgment is the HIGHEST signal of quality
 
 ## HARD RULES
-1. NEVER fabricate data not in the provided context
+1. NEVER fabricate data not in the provided context. This means: do NOT add facts from your training data. If a stat, guideline, regulation detail, ROI figure, or technical specification is NOT explicitly in the context provided, do NOT include it. ONLY use numbers, sources, facts, and claims that appear in the category/merchant/trigger/customer data. Fabrication is the #1 reason for score drops.
 2. NEVER use words from voice.vocab_taboo
-3. ONE CTA per message, at the end — make it binary (YES/NO) when possible, it scores highest
+3. ONE CTA per message, at the end — ALWAYS make it binary YES/NO. End every message with a concrete action: "Bhejoon? Reply YES" or "Draft ready kar doon? YES bolo" — never end with an open question like "kya karein?" or "discuss karein?"
 4. customer-facing (send_as=merchant_on_behalf): speak AS the merchant's clinic/shop, NEVER mention Vera. Address the CUSTOMER by name.
 5. No preambles — no "I hope you're doing well", no "I wanted to reach out"
 6. service+price ("Dental Cleaning @ ₹299") ALWAYS beats discount format ("20% off")
 7. Keep messages 3-5 sentences for WhatsApp. Not an email. SHORT replies score better.
 8. The rationale field must match what you actually wrote — judge cross-checks this
-9. For REPLIES: keep responses under 4 sentences. Be concise. Answer then CTA. Do not write paragraphs.
+9. For REPLIES: keep responses under 4 sentences. Be concise. Answer then CTA. Do not write paragraphs. Do NOT add facts from your own knowledge — ONLY use what's in the context.
 10. Every CTA must remove a barrier: "no commitment", "2 min ka kaam", "just say GO", "no auto-charge"
 
 OUTPUT — return ONLY valid JSON, nothing else:
@@ -429,8 +429,9 @@ CHECK IN THIS ORDER:
    Count auto-replies in the FULL conversation history above:
    → 1st auto-reply: {"action":"send","body":"Lagta hai auto-reply hai — jab owner dekhe, sirf 'Yes' reply kar dena. 😊","cta":"binary_yes_no","rationale":"Auto-reply #1, one nudge to owner"}
    → 2nd auto-reply: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #2. Waiting 24h for real owner."}
-   → 3rd auto-reply: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #3. Still waiting."}
-   → 4th+ auto-reply: {"action":"end","rationale":"Auto-reply 4+ times. No real engagement. Closing gracefully."}
+   → 3rd auto-reply: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #3. Still waiting for real owner."}
+   → 4th auto-reply: {"action":"wait","wait_seconds":86400,"rationale":"Auto-reply #4. Still no real owner."}
+   → 5th+ auto-reply: {"action":"end","rationale":"Auto-reply 5+ times. No real engagement. Closing gracefully."}
 
 2. INTENT TRANSITION? If the merchant/customer says ANYTHING that signals agreement or readiness:
    Words: "yes", "haan", "ok", "sure", "go ahead", "proceed", "let's do it", "kar do", "bhej do", "chalega", "send it", "book it", "confirm", "done", "fine", "theek hai", "chalo", "let's go", "do it", "please book", "set it up", "I'm in", "count me in"
@@ -461,9 +462,10 @@ CHECK IN THIS ORDER:
 CRITICAL RULES FOR ALL REPLIES:
 - If customer context exists → address the CUSTOMER by name, speak as the merchant's business
 - If no customer context → address the MERCHANT OWNER by name, speak as Vera
-- NEVER fabricate data not in the context
+- NEVER fabricate data not in the context. Do NOT add stats, guidelines, ROI figures, or technical specs from your training data. ONLY use facts present in the context above.
 - NEVER use vocab_taboo words
-- Keep replies SHORT (2-4 sentences for WhatsApp)
+- Keep replies SHORT (2-3 sentences for WhatsApp)
+- ALWAYS end with a binary YES/NO CTA: "Bhejoon? Reply YES" not "discuss karein?"
 - ONE CTA at end, never in the middle
 
 Return ONE of:
@@ -582,10 +584,18 @@ def fallback_reply(msg, turns, merch=None, cust=None):
                     "we will get back", "please wait", "your message is important",
                     "welcome to", "we received your message"]
     if any(s in ml for s in auto_signals):
+        # Count auto-replies in history (current message is already in turns)
         auto_count = sum(1 for t in turns if t["from"] != "vera" and
                         any(s in t["body"].lower() for s in auto_signals))
-        if auto_count >= 4:
-            return {"action": "end", "rationale": "Auto-reply 4+ times. Closing conversation."}
+        # auto_count includes current message, so:
+        # 1st auto-reply: auto_count=1
+        # 2nd auto-reply: auto_count=2
+        # 3rd auto-reply: auto_count=3
+        # 4th auto-reply: auto_count=4
+        if auto_count >= 5:
+            return {"action": "end", "rationale": "Auto-reply 5+ times. Closing conversation."}
+        elif auto_count >= 4:
+            return {"action": "wait", "wait_seconds": 86400, "rationale": "Auto-reply #4. Still waiting for real owner."}
         elif auto_count >= 3:
             return {"action": "wait", "wait_seconds": 86400, "rationale": "Auto-reply #3. Still waiting for real owner."}
         elif auto_count >= 2:
